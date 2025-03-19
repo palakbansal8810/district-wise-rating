@@ -1,10 +1,16 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS, cross_origin
 import joblib
 import pandas as pd
 import re
 import requests
 
+
+
+
 app = Flask(__name__)
+CORS(app)  # allow CORS for all domains on all routes.
+app.config['CORS_HEADERS'] = 'Content-Type'
 
 model = joblib.load('model.pkl')
 district_mapping = pd.read_csv('dataset/district_mapping.csv')
@@ -43,6 +49,7 @@ def predict_rating(year, district, state):
     return result[0]
 
 @app.route('/predict', methods=['POST'])
+@cross_origin()
 def predict():
     
     data = request.json
@@ -64,6 +71,66 @@ def predict():
         "year": year,
         "safety_index": safety_index
     })
+def extract_date_time(full_time):
+    if not full_time or full_time == "N/A":
+        return "N/A", "N/A"
 
-if __name__ == '__main__':
+    parts = full_time.split(" / ")  
+    clean_time = parts[-1]  
+
+    date_time_parts = clean_time.split(", ")
+    date = f"{date_time_parts[0].strip()}, {date_time_parts[1].strip()}"  
+    time1 = date_time_parts[2].split(" (IST)")[0].strip() if len(date_time_parts) > 1 else "N/A"
+
+    return date, time1
+
+def get_news(location):
+    url = f"https://timesofindia.indiatimes.com/topic/{location}-case"
+
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--log-level=3")
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    driver.quit()
+
+    articles = soup.find_all("div", class_="uwU81")
+
+    news_data = []
+    for article in articles:
+        title_tag = article.find("span")
+        link_tag = article.find("a", href=True)
+        time_tag = article.find("div", class_="ZxBIG")
+
+        if title_tag and link_tag:
+            title = title_tag.text.strip()
+            link = link_tag["href"]
+            full_time = time_tag.text.strip() if time_tag else "N/A"
+            
+            date, time1 = extract_date_time(full_time)
+            news_data.append({"title": title, "date": date, "time": time1, "link": link})
+
+    return news_data
+
+@app.route('/news', methods=['POST'])
+@cross_origin()
+def fetch_news():
+    data = request.get_json()
+    
+    if not data or "location" not in data:
+        return jsonify({"error": "Please provide a location in JSON format"}), 400
+
+    location = data["location"]
+    news = get_news(location)
+    return jsonify(news)
+
+if __name__ == '_main_':
     app.run(debug=True)
