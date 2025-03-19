@@ -4,3 +4,4 @@ pandas==1.4.3
 numpy ==1.26.4
 requests
 scikit-learn
+gunicorn
